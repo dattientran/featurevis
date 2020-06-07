@@ -505,3 +505,20 @@ class ChangeStd():
         x_std = torch.std(x.view(len(x), -1), dim=-1)
         fixed_std = x * (self.std / (x_std + 1e-9)).view(len(x), *[1, ] * (x.dim() - 1))
         return fixed_std
+
+class ChangeMaskStd():
+    """ Change the standard deviation of input.
+
+        Arguments:
+        std (float or tensor): Desired std. If tensor, it should be the same length as x.
+    """
+    def __init__(self, std, mask):
+        self.std = std
+        self.mask = mask
+
+    @varargin
+    def __call__(self, x):
+        mask_mean = torch.sum(x * self.mask, (-1, -2), keepdim=True) / self.mask.sum()
+        mask_std = torch.sqrt(torch.sum(((x - mask_mean) ** 2) * self.mask, (-1, -2), keepdim=True) / self.mask.sum())
+        fixed_std = x * (self.std / (mask_std + 1e-9)).view(len(x), *[1, ] * (x.dim() - 1))
+        return fixed_std
