@@ -81,6 +81,11 @@ def gradient_ascent(f, x, transform=None, regularization=None, gradient_f=None,
         feval = f(transformed_x)
         fevals.append(feval.item())
 
+        if additional_kwargs:
+            # Stop optimization when feval reaches target activation 
+            if feval >= additional_kwargs['target_level'] * additional_kwargs['mei_activation']:
+                break
+
         # Regularization
         if regularization is not None:
             reg_term = regularization(transformed_x, iteration=i)
