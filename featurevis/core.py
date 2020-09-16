@@ -7,7 +7,7 @@ from featurevis.exceptions import FeatureVisException
 
 
 def gradient_ascent(f, x, transform=None, regularization=None, gradient_f=None,
-                    post_update=None, optim_name='SGD', step_size=0.1, optim_kwargs={},
+                    post_update=None, optim_name='SGD', step_size=0.1, optim_kwargs={}, additional_kwargs={},
                     num_iterations=1000, save_iters=None, print_iters=100):
     """ Maximize f(x) via gradient ascent.
 
