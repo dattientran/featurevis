@@ -139,3 +139,122 @@ def gradient_ascent(f, x, transform=None, regularization=None, gradient_f=None,
     opt_x = x.detach().clone() if save_iters is None else saved_xs
 
     return opt_x, fevals, reg_terms
+
+
+def contour_walk(f, f_act, x, mei_act, random_dir=None, target_level=0.85, dev_thre=0, seed=0, transform=None, regularization=None, gradient_f=None,
+                    post_update=None, optim_name='SGD', step_size=0.1, optim_kwargs={}, 
+                    num_iterations=1000, save_iters=None, print_iters=100):
+    # Basic checks
+    if x.dtype != torch.float32:
+        raise ValueError('x must be of torch.float32 dtype')
+    x = x.detach().clone()  # to avoid changing original
+    x.requires_grad_()
+
+    # Declare optimizer
+    if optim_name == 'SGD':
+        optimizer = optim.SGD([x], lr=step_size, **optim_kwargs)
+    elif optim_name == 'Adam':
+        optimizer = optim.Adam([x], lr=step_size, **optim_kwargs)
+    else:
+        raise ValueError("Expected optim_name to be 'SGD' or 'Adam'")
+
+    # Run gradient ascent
+    fevals = []  # to store function evaluations
+    reg_terms = []  # to store regularization function evaluations
+    activations = []
+    saved_xs = [x.detach().clone()]  # to store xs (ignored if save_iters is None)
+    
+    torch.manual_seed(seed)
+
+    for i in range(1, num_iterations + 1):
+        # keep walking until walks off the equal activation contour with small amount of allowed deviation:            
+        # Zero gradients
+        if x.grad is not None:
+            x.grad.zero_()
+
+        # Transform input
+        transformed_x = x if transform is None else transform(x, iteration=i)
+
+        # f(x)
+        feval = f(transformed_x)
+        fevals.append(feval.item())
+        
+        # get image activation
+        act = f_act(transformed_x).item()
+        activations.append(act)
+        
+        # Regularization
+        if regularization is not None:
+            reg_term = regularization(transformed_x, iteration=i)
+            reg_terms.append(reg_term.item())
+        else:
+            reg_term = 0
+            
+        # Random walk or optimize back to the target activation level
+        if random_dir is None:  # keep optimizing back to target activation level
+            (-feval + reg_term).backward()
+            if gradient_f is not None:
+                x.grad = gradient_f(x.grad, iteration=i)
+            x.grad = x.grad / torch.norm(x.grad)
+            
+        elif (act >= mei_act * (target_level - dev_thre)):# and (act <= mei_act * (target_level + dev_thre)):
+            direction = torch.randn(x.shape).cuda()
+            if random_dir == 'random':  # random walk
+                x.grad = direction
+
+            elif random_dir == 'ortho':  # walk orthogonal to gradient direction
+                f_act(transformed_x).backward()
+                grad_norm = torch.sqrt(torch.sum(x.grad**2)) 
+                walk_direction = direction - (torch.dot(direction.view(-1), x.grad.view(-1)) / grad_norm**2) * x.grad
+                x.grad = walk_direction
+                
+            if gradient_f is not None:
+                x.grad = gradient_f(x.grad, iteration=i)
+            x.grad = x.grad / torch.norm(x.grad)
+            
+        else:
+            (-feval + reg_term).backward()
+            if gradient_f is not None:
+                x.grad = gradient_f(x.grad, iteration=i)
+            x.grad = x.grad / torch.norm(x.grad)
+
+        if (torch.abs(x.grad) < 1e-9).all():
+            warnings.warn('Gradient for x is all zero')
+
+        # Gradient ascent step (on x)
+        optimizer.step()
+
+        # Cleanup
+        if post_update is not None:
+            with torch.no_grad():
+                x[:] = post_update(x, iteration=i)  # in place so the optimizer still points to the right object
+
+        # Report results
+        if i % print_iters == 0:
+            feval = feval.item()
+            reg_term = reg_term if regularization is None else reg_term.item()
+            x_std = x.std().item()
+            print('Iter {}: f(x) = {:.2f}, reg(x) = {:.2f}, std(x) = {:.2f}'.format(i,
+                feval, reg_term, x_std))
+
+        # Save x
+        if save_iters is not None and i % save_iters == 0:
+            saved_xs.append(x.detach().clone())
+
+            
+    # Record f(x) and regularization(x) for the final x
+    with torch.no_grad():
+        transformed_x = x if transform is None else transform(x, iteration=i + 1)
+
+        feval = f(transformed_x)
+        fevals.append(feval.item())
+
+        if regularization is not None:
+            reg_term = regularization(transformed_x, iteration=i + 1)
+            reg_terms.append(reg_term.item())
+    print('Final f(x) = {:.2f}'.format(fevals[-1]))
+
+    # Set opt_x
+    opt_x = x.detach().clone() if save_iters is None else saved_xs
+
+    return opt_x, activations, fevals, reg_terms
