@@ -75,7 +75,7 @@ class TotalVariation():
     @varargin
     def __call__(self, x):
         # Using the definitions from Wikipedia.
-        diffs_y = torch.abs(x[:, :, 1:] - x[:, :, -1:])
+        diffs_y = torch.abs(x[:, :, 1:] - x[:, :, :-1])
         diffs_x = torch.abs(x[:, :, :, 1:] - x[:, :, :, :-1])
         if self.isotropic:
             tv = torch.sqrt(diffs_y[:, :, :, :-1] ** 2 +
@@ -142,7 +142,7 @@ class Similarity():
                 numer = torch.mm(residuals, residuals.t())
                 ssr = (residuals ** 2).sum(-1)
             else:
-                mask_sum = self.mask.sum() * (flat_x.shape[-1] / len(self.mask.view(-1)))
+                mask_sum = self.mask.sum() * (flat_x.shape[-1] / len(self.mask.reshape(-1)))
                 mean = flat_x.sum(-1) / mask_sum
                 residuals = x - mean.view(len(x), *[1, ] * (x.dim() - 1))  # N x 1 x 1 x 1
                 numer = (residuals[None, :] * residuals[:, None] * self.mask).view(
@@ -154,6 +154,9 @@ class Similarity():
             sim_matrix = torch.mm(flat_x, flat_x.t()) / (torch.ger(norms, norms) + 1e-9)
         elif self.metric == 'neg_euclidean':
             sim_matrix = -torch.norm(flat_x[None, :, :] - flat_x[:, None, :], dim=-1)
+        elif self.metric == 'mse':
+            mask_sum = self.mask.sum() * (flat_x.shape[-1] / len(self.mask.reshape(-1)))
+            sim_matrix = - (torch.norm(flat_x[None, :, :] - flat_x[:, None, :], dim=-1) **2 / mask_sum)
         else:
             raise ValueError('Invalid metric name:{}'.format(self.metric))
 
@@ -546,14 +549,17 @@ class ChangeMaskStats():
         Arguments:
         std (float or tensor): Desired std. If tensor, it should be the same length as x.
     """
-    def __init__(self, std, mean, mask):
+    def __init__(self, std, mean, mask, fix_bg=False):
         self.std = std
         self.mask = mask
         self.mean = mean
+        self.fix_bg = fix_bg
 
     @varargin
     def __call__(self, x):
         mask_mean = torch.sum(x * self.mask, (-1, -2), keepdim=True) / self.mask.sum()
         mask_std = torch.sqrt(torch.sum(((x - mask_mean) ** 2) * self.mask, (-1, -2), keepdim=True) / self.mask.sum())
         fixed_im = (x - mask_mean) * (self.std / (mask_std + 1e-9)).view(len(x), *[1, ] * (x.dim() - 1)) + self.mean
+        if self.fix_bg:
+            fixed_im = fixed_im * self.mask + self.mean * (1 - self.mask)
         return fixed_im
