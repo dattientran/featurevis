@@ -1,11 +1,14 @@
 import warnings
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from scipy import signal
+from scipy.stats import multivariate_normal
 
 from featurevis.utils import varargin
+
 
 
 ################################## REGULARIZERS ##########################################
@@ -343,6 +346,38 @@ class Identity():
     def __call__(self, x):
         return x
 
+class ThresholdLikelihood():
+    """ Threshold the latent space of a normal distribution based on radius or likelihood.
+        Arguments:
+        size (int): Length of latent vector
+        radius (float or tensor): Desired radius.
+        likelihood (float or tensor): Desired likelihood
+    """
+    def __init__(self, size, radius=None,likelihood=None):
+        self.size = size
+        m = multivariate_normal(np.zeros(self.size),np.diag(np.ones((self.size,self.size))))
+        if radius is not None and likelihood is not None:
+            raise Exception("Only radius or likelihood can be set")
+        if radius is not None:
+            self.radius = radius
+            temp = np.zeros(self.size)
+            temp[0] = radius
+            self.likelihood = m.pdf(temp)
+        else:
+            self.likelihood = likelihood
+            def cal_radius(p,dim):
+                m = multivariate_normal(0)
+                p /= m.pdf(0)**(dim-1)
+                x = np.sqrt(-2*np.log(p*np.sqrt(2*np.pi)))
+                return x
+            self.radius = cal_radius(self.likelihood,self.size)
+            
+    @varargin
+    def __call__(self, z):
+        # Scale linearly depending on the distance from origin
+        dist = (z**2).sum(1).sqrt().unsqueeze(1).repeat(1,self.size)
+        scaled_z = z * (self.radius/(dist+1e-9))
+        return scaled_z
 
 ############################## GRADIENT OPERATIONS #######################################
 class ChangeNorm():
