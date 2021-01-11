@@ -352,9 +352,12 @@ class ThresholdLikelihood():
         size (int): Length of latent vector
         radius (float or tensor): Desired radius.
         likelihood (float or tensor): Desired likelihood
+        fixed_radius (boolean): if True, always scale to the fixed radius regardless of original distance;
+        otherwise, only scale to the desired radius if original distance is larger than desired
     """
-    def __init__(self, size, radius=None,likelihood=None):
+    def __init__(self, size, radius=None,likelihood=None,fixed_radius=True):
         self.size = size
+        self.fixed_radius = fixed_radius
         m = multivariate_normal(np.zeros(self.size),np.diag(np.ones((self.size,self.size))))
         if radius is not None and likelihood is not None:
             raise Exception("Only radius or likelihood can be set")
@@ -376,7 +379,11 @@ class ThresholdLikelihood():
     def __call__(self, z):
         # Scale linearly depending on the distance from origin
         dist = (z**2).sum(1).sqrt().unsqueeze(1).repeat(1,self.size)
-        scaled_z = z * (self.radius/(dist+1e-9))
+        if self.fixed_radius:  
+            scaled_z = z * (self.radius/(dist+1e-9))
+        else:            
+            desired_r = (dist > self.radius) * self.radius + (dist <= self.radius) * dist
+            scaled_z = z * (desired_r/(dist+1e-9))
         return scaled_z
 
 ############################## GRADIENT OPERATIONS #######################################
