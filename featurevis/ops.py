@@ -35,7 +35,7 @@ class Feature_Vector_Ensemble():
             m.to(self.device)
             m.eval()
             
-            def feature_vector_forward(x, self=m.readout[self.readout_key], shift=None):
+            def feature_vector_forward(x, neuron_idx=self.neuron_idx, self=m.readout[self.readout_key], shift=None):
                 if self.positive:
                     positive(self.features)
                 self.grid.data = torch.clamp(self.grid.data, -1, 1)
@@ -62,6 +62,59 @@ class Feature_Vector_Ensemble():
 
         return vecs
 
+class SingleGridResps():
+    def __init__(self, models, readout_key, eye_pos=None, behavior=None, neuron_idx=slice(None), average_batch=True, all_neurons=True, device='cuda'):
+        import copy
+        
+        self.models = [copy.deepcopy(m) for m in models]
+        self.readout_key = readout_key
+        self.eye_pos = None if eye_pos is None else eye_pos.to(device)
+        self.behavior = None if behavior is None else behavior.to(device)
+        self.neuron_idx = neuron_idx
+        self.average_batch = average_batch
+        self.all_neurons = all_neurons
+        self.device = device
+
+    def __call__(self, x, iteration=None):
+        resps = []
+        
+        for m in self.models:
+            m.to(self.device)
+            m.eval()
+            
+            def single_grid_forward(x, neuron_idx=self.neuron_idx, self=m.readout[self.readout_key], shift=None):
+                if self.positive:
+                    positive(self.features)
+                self.grid.data = torch.clamp(self.grid.data, -1, 1)
+                N, c, w, h = x.size()
+                m = self.gauss_pyramid.scale_n + 1
+                feat = self.features.view(1, m * c, self.outdims)
+
+                if shift is None:
+                    grid = self.grid.expand(N, self.outdims, 1, 2)
+                else:
+                    grid = self.grid.expand(N, self.outdims, 1, 2) + shift[:, None, None, :]
+                # Alls neuron read from the grid of the target neuron
+                grid = grid[:, neuron_idx, :, :][:, None, :, :].expand(N, self.outdims, 1, 2)
+
+                pools = [F.grid_sample(xx, grid) for xx in self.gauss_pyramid(x)]
+                y = torch.cat(pools, dim=1).squeeze(-1)
+                y = (y * feat).sum(1).view(N, self.outdims)
+
+                if self.bias is not None:
+                    y = y + self.bias
+
+                return y     
+            
+            m.readout[self.readout_key].forward = single_grid_forward  # monkey patching the original readout forward
+            if self.all_neurons:
+                resps.append(m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior))
+            else:
+                resps.append(m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)[:,:, self.neuron_idx])
+
+        resps = torch.stack(resps)  # num_models x batch_size x num_neurons
+        resp = resps.mean(0).mean(0) if self.average_batch else resps.mean(0)
+        return resp
 
 class TotalVariation():
     """ Total variation regularization.
@@ -486,6 +539,17 @@ class MultiplyBy():
 
         return const * x
 
+class Slicing():
+    """
+    Slice x by one certain index.
+    """
+    def __init__(self, idx):
+        self.idx = idx
+
+    @varargin
+    def __call__(self, x, iteration=None):
+        return x[:, self.idx]
+    
 
 ########################### POST UPDATE OPERATIONS #######################################
 class GaussianBlur():
@@ -574,15 +638,18 @@ class ChangeMaskStd():
         Arguments:
         std (float or tensor): Desired std. If tensor, it should be the same length as x.
     """
-    def __init__(self, std, mask):
+    def __init__(self, std, mask, fix_bg=False, bg=0):
         self.std = std
         self.mask = mask
+        self.bg = bg
 
     @varargin
     def __call__(self, x):
         mask_mean = torch.sum(x * self.mask, (-1, -2), keepdim=True) / self.mask.sum()
         mask_std = torch.sqrt(torch.sum(((x - mask_mean) ** 2) * self.mask, (-1, -2), keepdim=True) / self.mask.sum())
         fixed_std = x * (self.std / (mask_std + 1e-9)).view(len(x), *[1, ] * (x.dim() - 1))
+        if self.fix_bg:
+            fixed_std = fixed_std * self.mask + self.bg * (1 - self.mask)
         return fixed_std
 
 class ChangeMaskStats():
