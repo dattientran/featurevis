@@ -95,9 +95,8 @@ class SingleGridResps():
                 else:
                     grid = self.grid.expand(N, self.outdims, 1, 2) + shift[:, None, None, :]
                 # Alls neuron read from the grid of the target neuron
-                grid = grid[:, neuron_idx, :, :][:, None, :, :].expand(N, self.outdims, 1, 2)
-
-                pools = [F.grid_sample(xx, grid) for xx in self.gauss_pyramid(x)]
+                grid = grid[:, neuron_idx, :, :][:, None, :, :].expand(N, self.outdims, 1, 2)s
+                pools = [F.grid_sample(xx, grid, align_corners=True) for xx in self.gauss_pyramid(x)]
                 y = torch.cat(pools, dim=1).squeeze(-1)
                 y = (y * feat).sum(1).view(N, self.outdims)
 
