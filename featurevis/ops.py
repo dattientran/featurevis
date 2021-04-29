@@ -63,13 +63,14 @@ class Feature_Vector_Ensemble():
         return vecs
 
 class SingleGridResps():
-    def __init__(self, models, readout_key, eye_pos=None, behavior=None, neuron_idx=slice(None), average_batch=True, all_neurons=True, device='cuda'):
+    def __init__(self, models, readout_key, eye_pos=None, behavior=None, fixed_grid=None, neuron_idx=slice(None), average_batch=True, all_neurons=True, device='cuda'):
         import copy
         
         self.models = [copy.deepcopy(m) for m in models]
         self.readout_key = readout_key
         self.eye_pos = None if eye_pos is None else eye_pos.to(device)
         self.behavior = None if behavior is None else behavior.to(device)
+        self.fixed_grid = fixed_grid
         self.neuron_idx = neuron_idx
         self.average_batch = average_batch
         self.all_neurons = all_neurons
@@ -82,7 +83,7 @@ class SingleGridResps():
             m.to(self.device)
             m.eval()
             
-            def single_grid_forward(x, neuron_idx=self.neuron_idx, self=m.readout[self.readout_key], shift=None):
+            def single_grid_forward(x, fixed_grid=self.fixed_grid, neuron_idx=self.neuron_idx, self=m.readout[self.readout_key], shift=None):
                 if self.positive:
                     positive(self.features)
                 self.grid.data = torch.clamp(self.grid.data, -1, 1)
@@ -94,8 +95,15 @@ class SingleGridResps():
                     grid = self.grid.expand(N, self.outdims, 1, 2)
                 else:
                     grid = self.grid.expand(N, self.outdims, 1, 2) + shift[:, None, None, :]
+
                 # Alls neuron read from the grid of the target neuron
-                grid = grid[:, neuron_idx, :, :][:, None, :, :].expand(N, self.outdims, 1, 2)
+                if fixed_grid is not None: 
+                    grid = torch.as_tensor(fixed_grid, dtype=torch.float32)[None, None, None].expand(N, self.outdims, 1, 2).to('cuda')
+                elif neuron_idx is not None:
+                    grid = grid[:, neuron_idx, :, :][:, None, :, :].expand(N, self.outdims, 1, 2)
+                else: 
+                    raise Exception("fixed_grid and neuron_idx cannot be None at the same time!")
+
                 pools = [F.grid_sample(xx, grid, align_corners=True) for xx in self.gauss_pyramid(x)]
                 y = torch.cat(pools, dim=1).squeeze(-1)
                 y = (y * feat).sum(1).view(N, self.outdims)
@@ -109,7 +117,7 @@ class SingleGridResps():
             if self.all_neurons:
                 resps.append(m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior))
             else:
-                resps.append(m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)[:,:, self.neuron_idx])
+                resps.append(m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)[:, self.neuron_idx])
 
         resps = torch.stack(resps)  # num_models x batch_size x num_neurons
         resp = resps.mean(0).mean(0) if self.average_batch else resps.mean(0)
