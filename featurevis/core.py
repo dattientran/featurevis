@@ -80,7 +80,7 @@ def gradient_ascent(f, x, transform=None, regularization=None, gradient_f=None,
         # f(x)
         feval = f(transformed_x)
         fevals.append(feval.item())
-
+        
         if additional_kwargs:
             # Stop optimization when feval reaches target activation 
             if feval >= additional_kwargs['target_level'] * additional_kwargs['mei_activation']:
@@ -140,6 +140,119 @@ def gradient_ascent(f, x, transform=None, regularization=None, gradient_f=None,
 
     return opt_x, fevals, reg_terms
 
+
+def px_gradient_ascent(f, x_f, mask_v, texture, transform=None, regularization=None, gradient_f=None,
+                    optim_name='SGD', step_size=0.1, optim_kwargs={}, additional_kwargs={},
+                    num_iterations=1000, print_iters=100):
+    
+    # Basic checks
+    if x_f.dtype != torch.float32:
+        raise ValueError('x_f must be of torch.float32 dtype')
+    x_f = x_f.detach().clone()  # to avoid changing original
+    x_f.requires_grad_()
+    
+    if mask_v.dtype != torch.float32:
+        raise ValueError('mask_v must be of torch.float32 dtype')
+    mask_v = mask_v.detach().clone()  # to avoid changing original
+    mask_v.requires_grad_()
+    
+    if texture.dtype != torch.float32:
+        raise ValueError('texture must be of torch.float32 dtype')
+    texture = texture.detach().clone()  # to avoid changing original
+    texture.requires_grad_()
+
+    # Declare optimizer
+    if optim_name == 'SGD':
+        optimizer = optim.SGD([x_f, mask_v, texture], lr=step_size, **optim_kwargs)
+    elif optim_name == 'Adam':
+        optimizer = optim.Adam([x_f, mask_v, texture], lr=step_size, **optim_kwargs)
+    else:
+        raise ValueError("Expected optim_name to be 'SGD' or 'Adam'")
+
+    # Run gradient ascent
+    fevals = []  # to store function evaluations
+    reg_terms = []  # to store regularization function evaluations
+    saved_xs = []  # to store xs (ignored if save_iters is None)
+    for i in range(1, num_iterations + 1):
+        # Zero gradients
+        if x_f.grad is not None:
+            x_f.grad.zero_()
+        if mask_v.grad is not None:
+            mask_v.grad.zero_()
+        if texture.grad is not None:
+            texture.grad.zero_()
+                    
+        # Transform input
+        transformed_x = x_f if transform is None else transform(x_f, mask_v, texture, iteration=i)
+        
+        # f(x)
+        feval = f(transformed_x)
+        fevals.append(feval.item())
+        
+        if additional_kwargs:
+            # Stop optimization when feval reaches target activation 
+            if feval >= additional_kwargs['target_level'] * additional_kwargs['mei_activation']:
+                break
+
+        # Regularization
+        if regularization is not None:
+            reg_term = regularization(transformed_x, iteration=i)
+            reg_terms.append(reg_term.item())
+        else:
+            reg_term = 0
+
+        # Compute gradient
+        (-feval + reg_term).backward()
+        if x_f.grad is None:
+            raise FeatureVisException('Iter{}: Gradient did not reach x_f.'.format(i))
+        # Precondition gradient
+        x_f.grad = x_f.grad if gradient_f is None else gradient_f(x_f.grad, iteration=i)
+        if (torch.abs(x_f.grad) < 1e-9).all():
+            warnings.warn('Iter{}: Gradient for im is all zero'.format(i))
+            
+        if mask_v.grad is None:
+            raise FeatureVisException('Iter{}: Gradient did not reach mask_v.'.format(i))
+        # Precondition gradient
+        mask_v.grad = mask_v.grad if gradient_f is None else gradient_f(mask_v.grad, iteration=i)
+        if (torch.abs(mask_v.grad) < 1e-9).all():
+            warnings.warn('Iter{}: Gradient for im is all zero'.format(i))
+            
+        if texture.grad is None:
+            raise FeatureVisException('Iter{}: Gradient did not reach texture.'.format(i))
+        # Precondition gradient
+        texture.grad = texture.grad if gradient_f is None else gradient_f(texture.grad, iteration=i)
+        if (torch.abs(texture.grad) < 1e-9).all():
+            warnings.warn('Iter{}: Gradient for im is all zero'.format(i))
+    
+        # Gradient ascent step (on x)
+        optimizer.step()
+
+        # Report results
+        if i % print_iters == 0:
+            feval = feval.item()
+            reg_term = reg_term if regularization is None else reg_term.item()
+            x_std = transformed_x.std().item()
+            print('Iter {}: f(x) = {:.2f}, reg(x) = {:.2f}, std(x) = {:.2f}'.format(i,
+                feval, reg_term, x_std))
+
+    # Record f(x) and regularization(x) for the final x
+    with torch.no_grad():
+        transformed_x = x_f if transform is None else transform(x_f, mask_v, texture, iteration=i)        
+        feval = f(transformed_x)
+        fevals.append(feval.item())
+
+        if regularization is not None:
+            reg_term = regularization(transformed_x)
+            reg_terms.append(reg_term.item())
+    print('Final f(x) = {:.2f}'.format(fevals[-1]))
+                      
+    # Save final optimized images          
+    opt_x_f = x_f.detach().clone()
+    opt_mask_v = mask_v.detach().clone()
+    opt_texture = texture.detach().clone()
+                      
+    return opt_x_f, opt_mask_v, opt_texture, fevals, reg_terms
+    
 
 def contour_walk(f, f_act, x, mei_act, random_dir=None, target_level=0.85, dev_thre=0, seed=0, transform=None, regularization=None, gradient_f=None,
                     post_update=None, optim_name='SGD', step_size=0.1, optim_kwargs={}, 
