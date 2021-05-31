@@ -284,19 +284,23 @@ class RandomCrop():
         height (int): Height of the crop.
         width (int): Width of the crop
     """
-    def __init__(self, height, width):
+    def __init__(self, height, width, n_crops=1):
         self.height = height
         self.width = width
+        self.n_crops = n_crops
 
     @varargin
     def __call__(self, x):
-        crop_y = torch.randint(0, max(0, x.shape[-2] - self.height) + 1, (1,),
-                               dtype=torch.int32).item()
-        crop_x = torch.randint(0, max(0, x.shape[-1] - self.width) + 1, (1,),
-                               dtype=torch.int32).item()
-        cropped_x = x[..., crop_y: crop_y + self.height, crop_x: crop_x + self.width]
-
-        return cropped_x
+        crop_y = torch.randint(0, max(0, x.shape[-2] - self.height) + 1, (self.n_crops,),
+                               dtype=torch.int32)
+        crop_x = torch.randint(0, max(0, x.shape[-1] - self.width) + 1, (self.n_crops,),
+                               dtype=torch.int32)
+        crops = []
+        for cy, cx in zip(crop_y, crop_x):
+            cropped_x = x[..., cy: cy + self.height, cx: cx + self.width]
+            crops.append(cropped_x)
+            
+        return torch.vstack(crops)
 
 
 class BatchedCrops():
