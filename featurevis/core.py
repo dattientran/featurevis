@@ -141,8 +141,8 @@ def gradient_ascent(f, x, transform=None, regularization=None, gradient_f=None,
     return opt_x, fevals, reg_terms
 
 
-def px_gradient_ascent(f, x_f, mask_v, texture, transform=None, regularization=None, gradient_f=None,
-                    optim_name='SGD', step_size=0.1, optim_kwargs={}, additional_kwargs={},
+def px_gradient_ascent(f, x_f, mask_v, texture, transform=None, regularization=None, text_postup=None, 
+                      image_postup=None, gradient_f=None, optim_name='SGD', step_size=0.1, optim_kwargs={}, additional_kwargs={},
                     num_iterations=1000, print_iters=100):
     
     # Basic checks
@@ -226,6 +226,14 @@ def px_gradient_ascent(f, x_f, mask_v, texture, transform=None, regularization=N
     
         # Gradient ascent step (on x)
         optimizer.step()
+
+        # Cleanup
+        if text_postup is not None:
+            with torch.no_grad():
+                texture[:] = text_postup(texture, iteration=i)
+        if image_postup is not None:
+            with torch.no_grad():
+                x_f[:] = image_postup(x_f, iteration=i)
 
         # Report results
         if i % print_iters == 0:
