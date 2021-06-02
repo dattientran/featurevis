@@ -140,6 +140,117 @@ def gradient_ascent(f, x, transform=None, regularization=None, gradient_f=None,
 
     return opt_x, fevals, reg_terms
 
+def param_gradient_ascent(f, x, mask_params, clipping=None, transform=None, regularization=None, gradient_f=None,
+                    post_update=None, optim_name='SGD', step_size=0.1, optim_kwargs={}, additional_kwargs={},
+                    num_iterations=1000, save_iters=None, print_iters=100):
+    
+    # Basic checks
+    if x.dtype != torch.float32:
+        raise ValueError('x must be of torch.float32 dtype')
+    x = x.detach().clone()  # to avoid changing original
+    x.requires_grad_()
+    
+    if mask_params.dtype != torch.float32:
+        raise ValueError('mask_params must be of torch.float32 dtype')
+    mask_params = mask_params.detach().clone()  # to avoid changing original
+    mask_params.requires_grad_()
+
+    # Declare optimizer
+    if optim_name == 'SGD':
+        optimizer = optim.SGD([x, mask_params], lr=step_size, **optim_kwargs)
+    elif optim_name == 'Adam':
+        optimizer = optim.Adam([x, mask_params], lr=step_size, **optim_kwargs)
+    else:
+        raise ValueError("Expected optim_name to be 'SGD' or 'Adam'")
+
+    # Run gradient ascent
+    fevals = []  # to store function evaluations
+    reg_terms = []  # to store regularization function evaluations
+    saved_xs = []  # to store xs (ignored if save_iters is None)
+    for i in range(1, num_iterations + 1):
+        # Zero gradients
+        if x.grad is not None:
+            x.grad.zero_()
+        if mask_params.grad is not None:
+            mask_params.grad.zero_()
+        
+        # Clip input
+        clipped_params = mask_params if clipping is None else clipping(mask_params, iteration=i)
+            
+        # Transform input
+        transformed_x = x if transform is None else transform(x, clipped_params, iteration=i)[0]
+        mask_f = transform(x, clipped_params, iteration=i)[1]
+        
+        # f(x)
+        feval = f(transformed_x)
+        fevals.append(feval.item())
+        
+        if additional_kwargs:
+            # Stop optimization when feval reaches target activation 
+            if feval >= additional_kwargs['target_level'] * additional_kwargs['mei_activation']:
+                break
+
+        # Regularization
+        if regularization is not None:
+            reg_term = regularization(transformed_x, iteration=i)
+            reg_terms.append(reg_term.item())
+        else:
+            reg_term = 0
+
+        # Compute gradient
+        (-feval + reg_term).backward()
+        if x.grad is None:
+            raise FeatureVisException('Iter{}: Gradient did not reach x.'.format(i))
+        if mask_params.grad is None:
+            raise FeatureVisException('Iter{}: Gradient did not reach mask_params.'.format(i))
+
+        # Precondition gradient
+        x.grad = x.grad if gradient_f is None else gradient_f(x.grad, iteration=i)
+        if (torch.abs(x.grad) < 1e-9).all():
+            warnings.warn('Iter{}: Gradient for x is all zero'.format(i))
+        if (torch.abs(mask_params.grad) < 1e-9).all():
+            warnings.warn('Iter{}: Gradient for mask_params is all zero'.format(i))
+            
+        # Gradient ascent step (on x)
+        optimizer.step()
+
+        # Cleanup
+        if post_update is not None:
+            with torch.no_grad():
+                x[:] = post_update(x, iteration=i)  # in place so the optimizer still points to the right object
+
+        # Report results
+        if i % print_iters == 0:
+            feval = feval.item()
+            reg_term = reg_term if regularization is None else reg_term.item()
+            x_std = x.std().item()
+            print('Iter {}: f(x) = {:.2f}, reg(x) = {:.2f}, std(x) = {:.2f}'.format(i,
+                feval, reg_term, x_std))
+
+        # Save x
+        if save_iters is not None and i % save_iters == 0:
+            saved_xs.append(x.detach().clone())
+
+    # Record f(x) and regularization(x) for the final x
+    with torch.no_grad():
+        clipped_params = mask_params if clipping is None else clipping(mask_params, iteration=i + 1)
+        transformed_x = x if transform is None else transform(x, clipped_params, iteration=i + 1)[0]
+        mask_f = transform(x, clipped_params, iteration=i + 1)[1]
+        
+        feval = f(transformed_x)
+        fevals.append(feval.item())
+
+        if regularization is not None:
+            reg_term = regularization(transformed_x, iteration=i + 1)
+            reg_terms.append(reg_term.item())
+    print('Final f(x) = {:.2f}'.format(fevals[-1]))
+
+    # Set opt_x
+    opt_x = x.detach().clone() if save_iters is None else saved_xs
+    opt_params = clipped_params.detach().clone()
+    mask_f = mask_f.detach().clone()
+
+    return opt_x, opt_params, mask_f, fevals, reg_terms
 
 def px_gradient_ascent(f, x_f, mask_v, texture, transform=None, regularization=None, text_postup=None, 
                       image_postup=None, gradient_f=None, optim_name='SGD', step_size=0.1, optim_kwargs={}, additional_kwargs={},
