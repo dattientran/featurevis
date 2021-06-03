@@ -140,7 +140,7 @@ def gradient_ascent(f, x, transform=None, regularization=None, gradient_f=None,
 
     return opt_x, fevals, reg_terms
 
-def param_gradient_ascent(f, x, mask_params, clipping=None, transform=None, regularization=None, gradient_f=None,
+def param_gradient_ascent(f, x, mask_params, clipping=None, transform=None, texture_blur=None, regularization=None, gradient_f=None,
                     post_update=None, optim_name='SGD', step_size=0.1, optim_kwargs={}, additional_kwargs={},
                     num_iterations=1000, save_iters=None, print_iters=100):
     
@@ -192,7 +192,10 @@ def param_gradient_ascent(f, x, mask_params, clipping=None, transform=None, regu
 
         # Regularization
         if regularization is not None:
-            reg_term = regularization(transformed_x, iteration=i)
+            if texture_blur is None:
+                reg_term = regularization(transformed_x, iteration=i)
+            else:
+                reg_term = regularization(transform(texture_blur(x), clipped_params, iteration=i)[0], iteration=i)            
             reg_terms.append(reg_term.item())
         else:
             reg_term = 0
@@ -241,7 +244,10 @@ def param_gradient_ascent(f, x, mask_params, clipping=None, transform=None, regu
         fevals.append(feval.item())
 
         if regularization is not None:
-            reg_term = regularization(transformed_x, iteration=i + 1)
+            if texture_blur is None:
+                reg_term = regularization(transformed_x, iteration=i+1)
+            else:
+                reg_term = regularization(transform(texture_blur(x), clipped_params, iteration=i+1)[0], iteration=i+1)
             reg_terms.append(reg_term.item())
     print('Final f(x) = {:.2f}'.format(fevals[-1]))
 
@@ -252,7 +258,7 @@ def param_gradient_ascent(f, x, mask_params, clipping=None, transform=None, regu
 
     return opt_x, opt_params, mask_f, fevals, reg_terms
 
-def px_gradient_ascent(f, x_f, mask_v, texture, transform=None, regularization=None, text_postup=None, 
+def px_gradient_ascent(f, x_f, mask_v, texture, transform=None, texture_blur=None, regularization=None, text_postup=None, 
                       image_postup=None, gradient_f=None, optim_name='SGD', step_size=0.1, optim_kwargs={}, additional_kwargs={},
                     num_iterations=1000, print_iters=100):
     
@@ -307,7 +313,10 @@ def px_gradient_ascent(f, x_f, mask_v, texture, transform=None, regularization=N
 
         # Regularization
         if regularization is not None:
-            reg_term = regularization(transformed_x, iteration=i)
+            if texture_blur is None:
+                reg_term = regularization(transformed_x, iteration=i)
+            else:
+                reg_term = regularization(transform(x_f, mask_v, texture_blur(texture), iteration=i), iteration=i)            
             reg_terms.append(reg_term.item())
         else:
             reg_term = 0
@@ -361,7 +370,10 @@ def px_gradient_ascent(f, x_f, mask_v, texture, transform=None, regularization=N
         fevals.append(feval.item())
 
         if regularization is not None:
-            reg_term = regularization(transformed_x)
+            if texture_blur is None:
+                reg_term = regularization(transformed_x, iteration=i+1)
+            else:
+                reg_term = regularization(transform(x_f, mask_v, texture_blur(texture), iteration=i+1), iteration=i+1)
             reg_terms.append(reg_term.item())
     print('Final f(x) = {:.2f}'.format(fevals[-1]))
                       
