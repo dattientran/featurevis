@@ -12,8 +12,9 @@ from featurevis.utils import varargin
 
 
 ################################## REGULARIZERS ##########################################
-class DoNothing(nn.Module):
-    def forward(self, x):
+class DoNothing():
+    @varargin
+    def __call__(self, x):
         return x
 
 class Feature_Vector_Ensemble():
@@ -29,7 +30,7 @@ class Feature_Vector_Ensemble():
         self.device = device
 
     def __call__(self, x, iteration=None):
-        vecs = []
+        vecs, resps = [], []
         
         for m in self.models:
             m.to(self.device)
@@ -49,18 +50,25 @@ class Feature_Vector_Ensemble():
                     grid = self.grid.expand(N, self.outdims, 1, 2) + shift[:, None, None, :]
                 pools = [F.grid_sample(xx, grid) for xx in self.gauss_pyramid(x)]
                 y = torch.cat(pools, dim=1).squeeze(-1)
-                return y     
+                feat_vec = y.clone()
+                y = (y * feat).sum(1).view(N, self.outdims)
+
+                if self.bias is not None:
+                    y = y + self.bias
+                return feat_vec, y     
             
             m.readout[self.readout_key].forward = feature_vector_forward  # monkey patching the original readout forward
-            m.modulator = None # avoids using the modulator on the output of readout (this is part of the forward of the model in base.py)
-            m.nonlinearity = DoNothing() # to avoid applying the nonlinearity in the forward of the model
-            
-            vecs.append(m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)[:,:, self.neuron_idx])
+            # m.modulator = None # avoids using the modulator on the output of readout (this is part of the forward of the model in base.py)
+            # m.nonlinearity = DoNothing() # to avoid applying the nonlinearity in the forward of the model
+            feat_vec, y = m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)[:,:, self.neuron_idx]
+            vecs.append(feat_vec)
+            resps.append(y)
             
         vecs = torch.cat(vecs, dim=1) # batch_size x (num_models x feature_vec_length)
-        #vecs = vecs.mean(0).mean(0) if self.average_batch else vecs.mean(0) # copied from original Emsemble
+        resps = torch.stack(resps)  # num_models x batch_size x num_neurons
+        resp = resps.mean(0).mean(0) if self.average_batch else resps.mean(0)
 
-        return vecs
+        return vecs, resps
 
 class SingleGridResps():
     def __init__(self, models, readout_key, eye_pos=None, behavior=None, fixed_grid=None, neuron_idx=slice(None), average_batch=True, all_neurons=True, device='cuda'):
