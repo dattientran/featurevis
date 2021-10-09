@@ -17,6 +17,11 @@ class DoNothing():
     def __call__(self, x):
         return x
 
+class ReverseSign():
+    @varargin
+    def __call__(self, x):
+        return - x
+
 class Feature_Vector_Ensemble():
     def __init__(self, models, readout_key, eye_pos=None, behavior=None, neuron_idx=slice(None), average_batch=True, device='cuda'):
         import copy
