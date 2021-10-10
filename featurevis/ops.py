@@ -550,17 +550,18 @@ class MultiplyBy():
         decay_factor: Compute const every iteration as `const + decay_factor * (iteration
             - 1)`. Ignored if None.
     """
-    def __init__(self, const, decay_factor=None):
+    def __init__(self, const, decay_factor=None, every_n_iterations=None):
         self.const = const
         self.decay_factor = decay_factor
+        self.every_n_iterations = every_n_iterations
 
     @varargin
     def __call__(self, x, iteration=None):
         if self.decay_factor is None:
             const = self.const
         else:
-            const = self.const + self.decay_factor * (iteration - 1)
-
+            # const = self.const + self.decay_factor * (iteration - 1)
+            const = self.const + self.decay_factor * ((iteration - 1) // self.every_n_iterations)
         return const * x
 
 class Slicing():
