@@ -697,3 +697,45 @@ class ChangeMaskStats():
         if self.fix_bg:
             fixed_im = fixed_im * self.mask + self.mean * (1 - self.mask)
         return fixed_im
+
+def get_mask_stats(image, mask):
+    mask_mean = (image * mask).sum(axis=(-1, -2), keepdims=True) / mask.sum()
+    mask_std = np.sqrt(np.sum(((image - mask_mean) ** 2) * mask, axis=(-1, -2), keepdims=True) / mask.sum())
+    return mask_mean, mask_std
+
+def center_and_crop_image(image, x_offset, y_offset, output_size=(128, 128)):
+    """ Center image to the closest integer and crop it
+
+    Arguments:
+        image (array): Original image
+        x_offset (float): How far to the right (in x) is the image center.
+        y_offset (float): How far to the bottom (in y) is the image center.
+        output_size (tuple): How far to the right is the image center.
+
+    Returns:
+        Centered image after cropping to the desired output size.
+    """
+    if output_size == (128, 128):
+        x_offset = x_offset * 4
+        y_offset = y_offset * 4
+
+    top = (image.shape[0] - output_size[0]) / 2 + y_offset
+    bottom = (image.shape[0] - output_size[0]) / 2 - y_offset
+    left = (image.shape[1] - output_size[1]) / 2 + x_offset
+    right = (image.shape[1] - output_size[1]) / 2 - x_offset
+    top, bottom, left, right = (int(round(x)) for x in [top, bottom, left, right])
+
+    # Pad image
+    pad_amount = ((abs(top) if top < 0 else 0, abs(bottom) if bottom < 0 else 0),
+                  (abs(left) if left < 0 else 0, abs(right) if right < 0 else 0))
+    padded = np.pad(image, pad_amount, mode='edge')
+    top, bottom, left, right = (np.clip(top, 0, None), np.clip(bottom, 0, None),
+                                np.clip(left, 0, None), np.clip(right, 0, None))
+
+    # Crop
+    cropped = padded[top:padded.shape[0] - bottom, left:padded.shape[1] - right]
+    if cropped.shape != output_size:
+        raise ValueError('Something wrong with the cropping. This may fail for '
+                         'images with odd dimensions.')
+
+    return cropped
