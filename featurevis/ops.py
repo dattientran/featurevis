@@ -703,6 +703,27 @@ def get_mask_stats(image, mask):
     mask_std = np.sqrt(np.sum(((image - mask_mean) ** 2) * mask, axis=(-1, -2), keepdims=True) / mask.sum())
     return mask_mean, mask_std
 
+def standardize_image(image, target_mean, target_std, mask=None, mask_mean_subtraction=True, mask_image=True, match_stats='ff'):
+    if match_stats == 'mask':
+        assert mask is not None, 'Cannot match statistics within mask when mask is not provided!' 
+        mean = (image * mask).sum(axis=(-1, -2), keepdims=True) / mask.sum()
+        std = np.sqrt(np.sum(((image - mask_mean) ** 2) * mask, axis=(-1, -2), keepdims=True) / mask.sum())
+        if mask_mean_subtraction:
+            image = (image - mean) / (std + 1e-9) * target_std + target_mean
+        else:
+            image = image / (std + 1e-9) * target_std
+        if mask is not None:
+            image = image * mask
+    elif match_stats == 'ff':
+        if mask_mean_subtraction:
+            mean = (image * mask).sum(axis=(-1, -2), keepdims=True) / mask.sum()
+            image = image - mean
+        if mask is not None:
+            image = image * mask
+        image = (image - image.mean(axis=(-1, -2), keepdims=True)) / (image.std(axis=(-1, -2), keepdims=True) + 1e-9) * target_std + target_mean
+
+    return image
+
 def center_and_crop_image(image, x_offset, y_offset, output_size=(128, 128)):
     """ Center image to the closest integer and crop it
 
