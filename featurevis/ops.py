@@ -652,9 +652,9 @@ class ChangeStats():
         
     @varargin
     def __call__(self, x):
-        x_std = torch.std(x.view(len(x), -1), dim=-1, keepdim=True)
-        x_mean = torch.mean(x.view(len(x), -1), dim=-1, keepdim=True)
-        fixed_im = (x - x_mean[:, :, None, None]) * (self.std / (x_std + 1e-9)).view(len(x), *[1, ] * (x.dim() - 1)) + self.mean
+        x_std = torch.std(x, (-1, -2), keepdim=True)
+        x_mean = torch.mean(x, (-1, -2), keepdim=True)
+        fixed_im = (x - x_mean) * (self.std / (x_std + 1e-9)) + self.mean
         return fixed_im
 
 class ChangeMaskStd():
@@ -707,7 +707,7 @@ def standardize_image(image, target_mean, target_std, mask=None, mask_mean_subtr
     if match_stats == 'mask':
         assert mask is not None, 'Cannot match statistics within mask when mask is not provided!' 
         mean = (image * mask).sum(axis=(-1, -2), keepdims=True) / mask.sum()
-        std = np.sqrt(np.sum(((image - mask_mean) ** 2) * mask, axis=(-1, -2), keepdims=True) / mask.sum())
+        std = np.sqrt(np.sum(((image - mean) ** 2) * mask, axis=(-1, -2), keepdims=True) / mask.sum())
         if mask_mean_subtraction:
             image = (image - mean) / (std + 1e-9) * target_std + target_mean
         else:
