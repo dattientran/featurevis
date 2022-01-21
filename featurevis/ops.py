@@ -35,7 +35,7 @@ class Feature_Vector_Ensemble():
         self.device = device
 
     def __call__(self, x, iteration=None):
-        vecs, resps = [], []
+        vecs = []
         
         for m in self.models:
             m.to(self.device)
@@ -53,27 +53,20 @@ class Feature_Vector_Ensemble():
                     grid = self.grid.expand(N, self.outdims, 1, 2)
                 else:
                     grid = self.grid.expand(N, self.outdims, 1, 2) + shift[:, None, None, :]
-                pools = [F.grid_sample(xx, grid) for xx in self.gauss_pyramid(x)]
+                pools = [F.grid_sample(xx, grid, align_corners=True) for xx in self.gauss_pyramid(x)]
                 y = torch.cat(pools, dim=1).squeeze(-1)
-                feat_vec = y.clone()
-                y = (y * feat).sum(1).view(N, self.outdims)
-
-                if self.bias is not None:
-                    y = y + self.bias
-                return feat_vec, y     
+                return y     
             
             m.readout[self.readout_key].forward = feature_vector_forward  # monkey patching the original readout forward
             # m.modulator = None # avoids using the modulator on the output of readout (this is part of the forward of the model in base.py)
             # m.nonlinearity = DoNothing() # to avoid applying the nonlinearity in the forward of the model
-            feat_vec, y = m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)[:,:, self.neuron_idx]
-            vecs.append(feat_vec)
-            resps.append(y)
+            y = m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)
+            vecs.append(m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)[:,:, self.neuron_idx])
             
-        vecs = torch.cat(vecs, dim=1) # batch_size x (num_models x feature_vec_length)
-        resps = torch.stack(resps)  # num_models x batch_size x num_neurons
-        resp = resps.mean(0).mean(0) if self.average_batch else resps.mean(0)
+        vecs = torch.stack(vecs) # num_models * batch_size x feature_vec_length
+        vecs = vecs.mean(0).mean(0) if self.average_batch else vecs.mean(0)
 
-        return vecs, resps
+        return vecs
 
 class SingleGridResps():
     def __init__(self, models, readout_key, eye_pos=None, behavior=None, fixed_grid=None, neuron_idx=slice(None), average_batch=True, all_neurons=True, device='cuda'):
@@ -573,7 +566,10 @@ class Slicing():
 
     @varargin
     def __call__(self, x, iteration=None):
-        return x[:, self.idx]
+        if type(x) == 'tuple':
+            return x[self.idx]
+        else:
+            return x[:, self.idx]
     
 
 ########################### POST UPDATE OPERATIONS #######################################
@@ -718,7 +714,7 @@ def standardize_image(image, target_mean, target_std, mask=None, mask_mean_subtr
         if mask_mean_subtraction:
             mean = (image * mask).sum(axis=(-1, -2), keepdims=True) / mask.sum()
             image = image - mean
-        if mask is not None:
+        if mask is not None and mask_image:
             image = image * mask
         image = (image - image.mean(axis=(-1, -2), keepdims=True)) / (image.std(axis=(-1, -2), keepdims=True) + 1e-9) * target_std + target_mean
 
