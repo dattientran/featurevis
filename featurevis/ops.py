@@ -53,17 +53,16 @@ class Feature_Vector_Ensemble():
                     grid = self.grid.expand(N, self.outdims, 1, 2)
                 else:
                     grid = self.grid.expand(N, self.outdims, 1, 2) + shift[:, None, None, :]
-                pools = [F.grid_sample(xx, grid, align_corners=True) for xx in self.gauss_pyramid(x)]
-                y = torch.cat(pools, dim=1).squeeze(-1)
+                pools = [F.grid_sample(xx, grid, align_corners=True)[:, :, neuron_idx, :] for xx in self.gauss_pyramid(x)]
+                y = torch.cat(pools, dim=1).squeeze()
                 return y     
             
             m.readout[self.readout_key].forward = feature_vector_forward  # monkey patching the original readout forward
             # m.modulator = None # avoids using the modulator on the output of readout (this is part of the forward of the model in base.py)
             # m.nonlinearity = DoNothing() # to avoid applying the nonlinearity in the forward of the model
-            y = m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)
-            vecs.append(m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior)[:,:, self.neuron_idx])
+            vecs.append(m(x, self.readout_key, eye_pos=self.eye_pos, behavior=self.behavior))
             
-        vecs = torch.stack(vecs) # num_models * batch_size x feature_vec_length
+        vecs = torch.stack(vecs) # num_models * batch_size * feature_vec_length
         vecs = vecs.mean(0).mean(0) if self.average_batch else vecs.mean(0)
 
         return vecs
@@ -110,7 +109,7 @@ class SingleGridResps():
                 else: 
                     raise Exception("fixed_grid and neuron_idx cannot be None at the same time!")
 
-                pools = [F.grid_sample(xx, grid, align_corners=True) for xx in self.gauss_pyramid(x)]
+                pools = [F.grid_sample(xx, grid, align_corners=True)[:, :, neuron_idx:neuron_idx+1, :] for xx in self.gauss_pyramid(x)]
                 y = torch.cat(pools, dim=1).squeeze(-1)
                 y = (y * feat).sum(1).view(N, self.outdims)
 
@@ -708,7 +707,7 @@ def standardize_image(image, target_mean, target_std, mask=None, mask_mean_subtr
             image = (image - mean) / (std + 1e-9) * target_std + target_mean
         else:
             image = image / (std + 1e-9) * target_std
-        if mask is not None:
+        if mask is not None and mask_image:
             image = image * mask
     elif match_stats == 'ff':
         if mask_mean_subtraction:
