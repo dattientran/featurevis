@@ -711,8 +711,9 @@ def standardize_image(image, target_mean, target_std, mask=None, mask_mean_subtr
             image = image * mask
     elif match_stats == 'ff':
         if mask_mean_subtraction:
-            mean = (image * mask).sum(axis=(-1, -2), keepdims=True) / mask.sum()
-            image = image - mean
+            if mask is not None:
+                mean = (image * mask).sum(axis=(-1, -2), keepdims=True) / mask.sum()
+                image = image - mean
         if mask is not None and mask_image:
             image = image * mask
         image = (image - image.mean(axis=(-1, -2), keepdims=True)) / (image.std(axis=(-1, -2), keepdims=True) + 1e-9) * target_std + target_mean
