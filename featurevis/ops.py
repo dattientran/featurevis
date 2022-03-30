@@ -720,7 +720,7 @@ def standardize_image(image, target_mean, target_std, mask=None, mask_mean_subtr
 
     return image
 
-def center_and_crop_image(image, x_offset, y_offset, output_size=(128, 128)):
+def center_and_crop_image(image, x_offset, y_offset, output_size=(32, 32)):
     """ Center image to the closest integer and crop it
 
     Arguments:
@@ -732,10 +732,10 @@ def center_and_crop_image(image, x_offset, y_offset, output_size=(128, 128)):
     Returns:
         Centered image after cropping to the desired output size.
     """
-    if output_size == (128, 128):
-        x_offset = x_offset * 4
-        y_offset = y_offset * 4
-
+    
+    x_offset = x_offset * int(output_size[-1] // 32)
+    y_offset = y_offset * int(output_size[-2] // 32)
+    
     top = (image.shape[0] - output_size[0]) / 2 + y_offset
     bottom = (image.shape[0] - output_size[0]) / 2 - y_offset
     left = (image.shape[1] - output_size[1]) / 2 + x_offset
@@ -756,3 +756,61 @@ def center_and_crop_image(image, x_offset, y_offset, output_size=(128, 128)):
                          'images with odd dimensions.')
 
     return cropped
+
+def create_whole_mei(crop, mask, center_x, center_y, output_size=(36, 64), normalize_crop=True):
+    if len(crop.shape) == 2: 
+        if normalize_crop:
+            crop = (crop - crop.mean()) / (crop.std() + 1e-9)
+        top = (crop.shape[0] - output_size[0]) / 2 - center_y
+        bottom = (crop.shape[0] - output_size[0]) / 2 + center_y
+        left = (crop.shape[1] - output_size[1]) / 2 - center_x
+        right = (crop.shape[1] - output_size[1]) / 2 + center_x
+        top, bottom, left, right = (int(round(x)) for x in [top, bottom, left, right])
+
+        # Pad image
+        pad_amount = ((abs(top) if top < 0 else 0, abs(bottom) if bottom < 0 else 0),
+                      (abs(left) if left < 0 else 0, abs(right) if right < 0 else 0))
+    elif len(crop.shape) == 3:
+        if normalize_crop:
+            # Error note: for group 222 with control_params=3, crop = (crop - crop.mean()) / crop.std() was used. This is wrong!
+            mean, std = crop.mean(axis=(1, 2), keepdims=True), crop.std(axis=(1, 2), keepdims=True)
+            crop = (crop - mean) / (std + 1e-9)
+        top = (crop.shape[1] - output_size[1]) / 2 - center_y
+        bottom = (crop.shape[1] - output_size[1]) / 2 + center_y
+        left = (crop.shape[2] - output_size[2]) / 2 - center_x
+        right = (crop.shape[2] - output_size[2]) / 2 + center_x
+        top, bottom, left, right = (int(round(x)) for x in [top, bottom, left, right])
+
+        # Pad image
+        pad_amount = ((0, 0),
+                      (abs(top) if top < 0 else 0, abs(bottom) if bottom < 0 else 0),
+                      (abs(left) if left < 0 else 0, abs(right) if right < 0 else 0))
+
+    padded = np.pad(crop, pad_amount, mode='constant', constant_values=0)
+    top, bottom, left, right = (np.clip(top, 0, None), np.clip(bottom, 0, None),
+                                np.clip(left, 0, None), np.clip(right, 0, None))
+    
+    # Crop
+    if len(crop.shape) == 2:
+        cropped = padded[top:padded.shape[0] - bottom, left:padded.shape[1] - right]
+    elif len(crop.shape) == 3:
+        cropped = padded[:, top:padded.shape[1] - bottom, left:padded.shape[2] - right]
+
+    if cropped.shape != output_size:
+        raise ValueError('Something wrong with the cropping. This may fail for images'
+                         'with odd dimensions.')
+    return cropped
+
+def get_mei_sim(images, mei, mask=None):
+    if mask is not None:
+        images = images * mask
+        mei = mei * mask
+    images = images.reshape(len(images), -1)
+    mei = mei.reshape(1, -1)
+    sims = - np.linalg.norm(images - mei, axis=-1)
+    return sims
+
+def get_batch(lst, batch_size):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), batch_size):
+        yield lst[i:i + batch_size]
