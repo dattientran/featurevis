@@ -1,3 +1,4 @@
+from bdb import set_trace
 import warnings
 
 import numpy as np
@@ -186,11 +187,12 @@ class Similarity():
         mask (torch.tensor or None): Mask to use when calculating similarities. Expected
             to be in [0, 1] range and be broadcastable with input.
     """
-    def __init__(self, weight=1, metric='correlation', combine_op=torch.max, mask=None):
+    def __init__(self, weight=1, metric='correlation', combine_op=torch.max, mask=None, return_full_matrix=False):
         self.weight = weight
         self.metric = metric
         self.combine_op = combine_op
         self.mask = mask
+        self.return_full_matrix = return_full_matrix
 
     @varargin
     def __call__(self, x):
@@ -228,13 +230,16 @@ class Similarity():
         else:
             raise ValueError('Invalid metric name:{}'.format(self.metric))
 
-        # Compute overall similarity
-        triu_idx = torch.triu(torch.ones(len(x), len(x)), diagonal=1) == 1
-        similarity = self.combine_op(sim_matrix[triu_idx])
+        if self.return_full_matrix:
+            return sim_matrix
+        else:
+            # Compute overall similarity
+            triu_idx = torch.triu(torch.ones(len(x), len(x)), diagonal=1) == 1
+            similarity = self.combine_op(sim_matrix[triu_idx])
 
-        loss = self.weight * similarity
+            loss = self.weight * similarity
 
-        return loss
+            return loss
 
 
 # class PixelCNN():
@@ -305,7 +310,7 @@ class RandomCrop():
             cropped_x = x[..., cy: cy + self.height, cx: cx + self.width]
             crops.append(cropped_x)
             
-        return torch.vstack(crops)
+        return torch.vstack(crops), crop_x, crop_y
 
 
 class BatchedCrops():
@@ -661,6 +666,7 @@ class ChangeMaskStd():
     def __init__(self, std, mask, fix_bg=False, bg=0):
         self.std = std
         self.mask = mask
+        self.fix_bg = fix_bg
         self.bg = bg
 
     @varargin
@@ -755,7 +761,7 @@ def center_and_crop_image(image, x_offset, y_offset, output_size=(32, 32)):
         raise ValueError('Something wrong with the cropping. This may fail for '
                          'images with odd dimensions.')
 
-    return cropped
+    return cropped, np.array([top, bottom, left, right])
 
 def create_whole_mei(crop, mask, center_x, center_y, output_size=(36, 64), normalize_crop=True):
     if len(crop.shape) == 2: 
