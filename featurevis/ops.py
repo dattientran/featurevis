@@ -752,6 +752,7 @@ def center_and_crop_image(image, x_offset, y_offset, output_size=(32, 32)):
     pad_amount = ((abs(top) if top < 0 else 0, abs(bottom) if bottom < 0 else 0),
                   (abs(left) if left < 0 else 0, abs(right) if right < 0 else 0))
     padded = np.pad(image, pad_amount, mode='edge')
+    padding = np.array([top, bottom, left, right])
     top, bottom, left, right = (np.clip(top, 0, None), np.clip(bottom, 0, None),
                                 np.clip(left, 0, None), np.clip(right, 0, None))
 
@@ -761,7 +762,7 @@ def center_and_crop_image(image, x_offset, y_offset, output_size=(32, 32)):
         raise ValueError('Something wrong with the cropping. This may fail for '
                          'images with odd dimensions.')
 
-    return cropped, np.array([top, bottom, left, right])
+    return cropped, padding
 
 def create_whole_mei(crop, mask, center_x, center_y, output_size=(36, 64), normalize_crop=True):
     if len(crop.shape) == 2: 
